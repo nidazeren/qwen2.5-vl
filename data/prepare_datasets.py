@@ -277,24 +277,40 @@ def load_smhd() -> list[dict]:
     image_paths = list(root.rglob("*.png")) + list(root.rglob("*.jpg")) + list(root.rglob("*.jpeg"))
     # tqdm ile ilerleme çubuğu: yüzlerce taranmış belge görselini RGB'ye çevirmek (_to_pil)
     # birkaç dakika sürebilir; ilerleme görünmezse "takıldı" sanılıp erken durdurulabilir.
-    for img_path in tqdm(image_paths, desc="      SMHD görselleri işleniyor"):
-        txt_path = img_path.with_suffix(".txt")
-        if not txt_path.exists():
-            continue
-        raw_text = txt_path.read_text(encoding="utf-8", errors="ignore")
-        # SMHD dokümantasyonuna göre üstü çizilmiş/silinmiş içerik '#' ile işaretlenir;
-        # OCR hedefi olarak yalnızca OKUNABİLİR (üstü çizilmemiş) metni istiyoruz.
-        clean_text = " ".join(tok for tok in raw_text.split() if not tok.startswith("#")).strip()
-        if not clean_text:
-            continue
-        try:
-            image = _to_pil(img_path)
-        except Exception as e:
-            # Tek bir bozuk/okunamayan görsel yüzünden TÜM SMHD yüklemesinin çökmesini
-            # önlemek için bu görsel atlanır; hangi dosyanın sorunlu olduğu ekrana yazdırılır.
-            print(f"      !! {img_path.name} okunamadı, atlanıyor: {e}")
-            continue
-        records.append({"image": image, "text": clean_text, "source": "smhd_english"})
+    #
+    # NOT: Bu döngü KeyboardInterrupt'a karşı KORUMALIDIR. Colab oturumlarında (sebebi
+    # bu makineden görülemeyen bir nedenle — yanlışlıkla "Durdur" tıklaması, bağlantı
+    # kesintisi vb.) döngü ortasında gerçek bir kesme sinyali gelebiliyor. Kesinti
+    # gelirse, o ana kadar başarıyla işlenmiş kayıtlar KAYBOLMADAN döndürülür — aksi
+    # halde tüm SMHD ilerlemesi her seferinde sıfırlanırdı.
+    try:
+        for img_path in tqdm(image_paths, desc="      SMHD görselleri işleniyor"):
+            txt_path = img_path.with_suffix(".txt")
+            if not txt_path.exists():
+                continue
+            raw_text = txt_path.read_text(encoding="utf-8", errors="ignore")
+            # SMHD dokümantasyonuna göre üstü çizilmiş/silinmiş içerik '#' ile işaretlenir;
+            # OCR hedefi olarak yalnızca OKUNABİLİR (üstü çizilmemiş) metni istiyoruz.
+            clean_text = " ".join(tok for tok in raw_text.split() if not tok.startswith("#")).strip()
+            if not clean_text:
+                continue
+            try:
+                image = _to_pil(img_path)
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                # Tek bir bozuk/okunamayan görsel yüzünden TÜM SMHD yüklemesinin çökmesini
+                # önlemek için bu görsel atlanır; hangi dosyanın sorunlu olduğu ekrana yazdırılır.
+                print(f"      !! {img_path.name} okunamadı, atlanıyor: {e}")
+                continue
+            records.append({"image": image, "text": clean_text, "source": "smhd_english"})
+    except KeyboardInterrupt:
+        print(
+            f"\n      !! Kesme sinyali alındı ({len(records)} kayıt bu ana kadar işlendi); "
+            "bu kayıtlar KAYBEDİLMEDEN kaydediliyor. Kalan görseller için scripti tekrar "
+            "çalıştırabilirsiniz (mevcut smhd_english klasörünü silip yeniden çalıştırmanız "
+            "gerekir çünkü bu kaynak parça parça değil tek seferde kaydedilir)."
+        )
 
     print(f"      -> {len(records)} örnek yüklendi.")
     return records
