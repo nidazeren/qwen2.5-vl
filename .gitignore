@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# Sanal ortamlar
+.venv/
+venv/
+env/
+
+# Colab / Jupyter geçici dosyaları
+*.log
+
+# Bu proje ASIL veriyi ve model ağırlıklarını Google Drive'da (Colab dışında) tutar;
+# yerel/repo içine yanlışlıkla büyük dosya inmesi ihtimaline karşı önlem:
+raw_data/
+processed_data/
+replay_data/
+checkpoints/
+eval_outputs/
+analysis_outputs/
+*.arrow
+*.safetensors
+*.bin
+*.ckpt
+
+# Kaggle kimlik bilgisi (ASLA repoya eklenmemeli)
+kaggle.json
+
+# İşletim sistemi / editör dosyaları
+.DS_Store
+Thumbs.db
+.vscode/

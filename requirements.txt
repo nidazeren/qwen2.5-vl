@@ -1,0 +1,26 @@
+# requirements.txt
+# ================
+# NOT: torch/torchvision BİLEREK burada YOK — Google Colab, CUDA sürümüyle eşleşen bir
+# PyTorch kurulumuyla gelir; bunu pip ile yeniden kurmaya çalışmak sürüm çakışmalarına
+# yol açabilir. Yalnızca Colab'ın ÜZERİNE eklenmesi gereken paketler aşağıdadır.
+#
+# flash-attn (A100 tam eğitiminde isteğe bağlı hız artışı için) BİLEREK burada YOK;
+# derlenmesi uzun sürebildiği/T4'te gereksiz olduğu için notebooks/01_full_training_a100.ipynb
+# içinde AYRI bir (isteğe bağlı) hücrede kurulur. Kurulu değilse kod otomatik olarak
+# sdpa'ya düşer (bkz. training/lora_setup.py: select_dtype_and_attn_impl).
+
+transformers>=4.51.0
+accelerate>=1.0.0
+peft>=0.13.0
+trl>=0.15.0
+datasets>=3.0.0
+huggingface_hub>=0.25.0
+qwen-vl-utils>=0.0.8
+pillow>=10.0.0
+jiwer>=3.0.0
+rouge-score>=0.1.2
+kagglehub>=0.3.0
+bitsandbytes>=0.43.0
+tqdm>=4.66.0
+sentencepiece>=0.2.0
+tensorboard>=2.16.0
