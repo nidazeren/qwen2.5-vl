@@ -52,6 +52,7 @@ from data import io_utils  # noqa: E402
 import datasets  # type: ignore
 from PIL import Image  # type: ignore
 from huggingface_hub import snapshot_download  # type: ignore
+from tqdm import tqdm  # type: ignore
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +274,10 @@ def load_smhd() -> list[dict]:
     root = _local_scratch_copy(drive_root, "SMHD")
     records = []
     # Beklenen yapı: root/<kategori>/<belge_adı>.png (veya .jpg) + eşlenik .txt transkripsiyon.
-    for img_path in list(root.rglob("*.png")) + list(root.rglob("*.jpg")) + list(root.rglob("*.jpeg")):
+    image_paths = list(root.rglob("*.png")) + list(root.rglob("*.jpg")) + list(root.rglob("*.jpeg"))
+    # tqdm ile ilerleme çubuğu: yüzlerce taranmış belge görselini RGB'ye çevirmek (_to_pil)
+    # birkaç dakika sürebilir; ilerleme görünmezse "takıldı" sanılıp erken durdurulabilir.
+    for img_path in tqdm(image_paths, desc="      SMHD görselleri işleniyor"):
         txt_path = img_path.with_suffix(".txt")
         if not txt_path.exists():
             continue
