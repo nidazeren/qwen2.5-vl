@@ -133,7 +133,7 @@ HANDWRITING_SYNTHETIC_HF_ID = "emredeveloper/turkish-ocr"
 #     el yazısı çizgi/strok çeşitliliğine karşı sağlamlık (robustness) kazandırmaktır.
 #     USE_SMHD=False iken bu kaynak tamamen devre dışı kalır ve payı HANDWRITING_SYNTHETIC_HF_ID'ye
 #     kayar (bkz. aşağıdaki KARIŞIM ORANLARI bölümü) — kod bu durumda da hatasız çalışır.
-USE_SMHD = False  # SMHD izniniz gelip Drive'a yerleştirdiğinizde True yapın.
+USE_SMHD = True  # SMHD verisi Drive'a yerleştirildi.
 
 # (e) OmniDocBench — self-distillation (replay) için görsel KAYNAĞI. Ground-truth
 #     etiketleri KULLANILMAZ; bunun yerine ince ayardan ÖNCEKİ (baseline) model bu
