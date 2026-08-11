@@ -77,6 +77,15 @@ def _to_pil(image_like) -> Image.Image:
 def load_printed_synthetic() -> list[dict]:
     print(f"[1/5] {config.PRINTED_SYNTHETIC_HF_ID} indiriliyor/yükleniyor...")
     ds = datasets.load_dataset(config.PRINTED_SYNTHETIC_HF_ID, split="train")
+
+    # ÖNEMLİ (performans): PILOT_MODE'da yalnızca birkaç yüz örnek gerekiyorken, tüm
+    # 225.000 satırı tek tek PIL görüntüsüne çevirmek (aşağıdaki döngü) dakikalarca
+    # sürebilir. Bu yüzden PIL dönüşümünden ÖNCE, `datasets` kütüphanesinin tembel
+    # (lazy) select/shuffle mekanizmasıyla veri seti küçültülür; yalnızca SEÇİLEN
+    # satırlar için görüntü çözme/kopyalama işlemi yapılır.
+    if config.PILOT_MODE and len(ds) > config.PILOT_SAMPLES_PER_SOURCE:
+        ds = ds.shuffle(seed=config.RANDOM_SEED).select(range(config.PILOT_SAMPLES_PER_SOURCE))
+
     records = []
     for row in ds:
         records.append(
