@@ -287,7 +287,14 @@ def load_smhd() -> list[dict]:
         clean_text = " ".join(tok for tok in raw_text.split() if not tok.startswith("#")).strip()
         if not clean_text:
             continue
-        records.append({"image": _to_pil(img_path), "text": clean_text, "source": "smhd_english"})
+        try:
+            image = _to_pil(img_path)
+        except Exception as e:
+            # Tek bir bozuk/okunamayan görsel yüzünden TÜM SMHD yüklemesinin çökmesini
+            # önlemek için bu görsel atlanır; hangi dosyanın sorunlu olduğu ekrana yazdırılır.
+            print(f"      !! {img_path.name} okunamadı, atlanıyor: {e}")
+            continue
+        records.append({"image": image, "text": clean_text, "source": "smhd_english"})
 
     print(f"      -> {len(records)} örnek yüklendi.")
     return records
