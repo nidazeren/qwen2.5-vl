@@ -449,9 +449,21 @@ def main() -> None:
     _save_step("smhd_english", load_smhd, rng, skip_if_exists=False)
 
     replay_index_path = config.RAW_DATA_DIR / "omnidocbench_replay_source.jsonl"
+    # Yalnızca dosyanın VAR OLMASI yeterli değil: HF_HOME Drive'a taşınmadan önce
+    # kaydedilmiş eski bir indeks, artık var olmayan (Colab'ın geçici diskinde silinmiş)
+    # dosya yollarına işaret ediyor olabilir. Bu yüzden içindeki İLK yolun gerçekten
+    # diskte olup olmadığı da kontrol edilir; yoksa indeks BAYAT sayılıp yeniden üretilir.
+    index_is_valid = False
     if replay_index_path.exists():
-        print(f"[skip] omnidocbench_replay_source zaten diskte mevcut ({replay_index_path}).")
+        existing_index = io_utils.load_image_index("omnidocbench_replay_source")
+        if existing_index and Path(existing_index[0]["image_path"]).exists():
+            index_is_valid = True
+
+    if index_is_valid:
+        print(f"[skip] omnidocbench_replay_source zaten diskte ve geçerli ({replay_index_path}).")
     else:
+        if replay_index_path.exists():
+            print("      !! omnidocbench_replay_source bayat (dosyalar artık yok); yeniden üretiliyor.")
         replay_images = load_replay_source_images()  # replay'de zaten ayrı örnekleme yapılıyor
         io_utils.save_image_index(replay_images, "omnidocbench_replay_source")
 

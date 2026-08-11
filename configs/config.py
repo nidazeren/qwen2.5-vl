@@ -46,6 +46,18 @@ DRIVE_ROOT = Path(
     os.environ.get("QWEN_OCR_DRIVE_ROOT", "/content/drive/MyDrive/qwen25vl_turkish_ocr")
 )
 
+# ÖNEMLİ: huggingface_hub'ın (model + veri seti) önbelleğini Drive'a yönlendiriyoruz.
+# Aksi halde `snapshot_download`/`from_pretrained` indirmeleri Colab'ın GEÇİCİ diskine
+# (/root/.cache/huggingface) gider; bu disk runtime her yeniden başladığında (RAM
+# taşması, bağlantı kopması, elle yeniden başlatma) TAMAMEN SİLİNİR. Bu hem indirilen
+# ~7,5 GB'lık model ağırlıklarının HER SEFERİNDE yeniden inmesine yol açar, hem de
+# data/prepare_datasets.py'nin Drive'a kaydettiği dosya YOLLARININ (ör. OmniDocBench
+# görselleri) bir sonraki oturumda geçersiz kalmasına neden olur. `setdefault` kullanılır
+# ki kullanıcı isterse ortam değişkeniyle override edebilsin. Bu satır, herhangi bir
+# `transformers`/`datasets`/`huggingface_hub` içe aktarımından ÖNCE çalışmalıdır — bu
+# yüzden config.py'nin en başında, DRIVE_ROOT tanımlanır tanımlanmaz yapılır.
+os.environ.setdefault("HF_HOME", str(DRIVE_ROOT / "hf_cache"))
+
 # Ham/indirilen veri setlerinin önbelleklendiği klasör (HF datasets cache, Kaggle indirmeleri,
 # replay_generation.py çıktısı dahil — replay_ocr/replay_general de birer "ham kaynak"
 # olarak burada, diğer 4 kaynakla aynı şemada tutulur). Bu klasör PILOT/TAM modlar
