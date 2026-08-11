@@ -64,14 +64,38 @@ from tqdm import tqdm  # type: ignore
 TS_TR_MANUAL_HINT: Optional[dict] = None
 
 
+# Bellekte tutulacak (ve diske kaydedilecek) görsellerin UZUN kenarı için üst sınır.
+# Qwen2.5-VL zaten görselleri config.MAX_PIXELS'e göre (çok daha küçük bir çözünürlüğe,
+# ör. ~896x672) yeniden boyutlandırıyor; bu yüzden ham taranmış belge görsellerini
+# (SMHD gibi, bazen birkaç bin piksel boyutunda) OLDUĞU GİBİ bellekte tutmanın hiçbir
+# eğitim faydası yoktur, yalnızca RAM'i gereksiz yere taşırır (yüzlerce büyük görsel
+# aynı anda bellekte tutulduğunda Colab'ın RAM'i tükenip oturum çökebilir — nitekim
+# SMHD yüklenirken tam olarak bu gerçekleşti). 1600px, OCR için gereğinden çok daha
+# fazla detay bırakırken belleği güvenli tutar (500 görsel x ~1600x1200x3 bayt ≈ 2,9 GB).
+_MAX_IMAGE_DIMENSION = 1600
+
+
+def _downscale_if_needed(image: Image.Image) -> Image.Image:
+    if max(image.size) <= _MAX_IMAGE_DIMENSION:
+        return image
+    image = image.copy()
+    # Image.Resampling.LANCZOS (Pillow >= 9.1'in güncel API'si) kullanılır; eski
+    # üst-seviye Image.LANCZOS sabiti Pillow 10'da kaldırıldığı için requirements.txt'te
+    # pinlenen pillow>=10.0.0 ile bu tercih edilmelidir.
+    image.thumbnail((_MAX_IMAGE_DIMENSION, _MAX_IMAGE_DIMENSION), Image.Resampling.LANCZOS)
+    return image
+
+
 def _to_pil(image_like) -> Image.Image:
-    """`datasets` kütüphanesinin Image() sütunundan veya ham bytes'tan PIL.Image üretir."""
+    """`datasets` kütüphanesinin Image() sütunundan veya ham bytes'tan PIL.Image üretir.
+    Bellek taşmasını önlemek için çok büyük görseller otomatik küçültülür (bkz.
+    _MAX_IMAGE_DIMENSION)."""
     if isinstance(image_like, Image.Image):
-        return image_like.convert("RGB")
+        return _downscale_if_needed(image_like.convert("RGB"))
     if isinstance(image_like, dict) and "bytes" in image_like and image_like["bytes"]:
-        return Image.open(io.BytesIO(image_like["bytes"])).convert("RGB")
+        return _downscale_if_needed(Image.open(io.BytesIO(image_like["bytes"])).convert("RGB"))
     if isinstance(image_like, (str, Path)):
-        return Image.open(image_like).convert("RGB")
+        return _downscale_if_needed(Image.open(image_like).convert("RGB"))
     raise TypeError(f"Bilinmeyen görsel tipi: {type(image_like)}")
 
 
