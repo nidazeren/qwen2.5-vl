@@ -36,6 +36,7 @@ import io
 import json
 import random
 import shutil
+import signal
 import sys
 import tempfile
 from pathlib import Path
@@ -72,6 +73,30 @@ def _to_pil(image_like) -> Image.Image:
     if isinstance(image_like, (str, Path)):
         return Image.open(image_like).convert("RGB")
     raise TypeError(f"Bilinmeyen görsel tipi: {type(image_like)}")
+
+
+class _ImageTimeoutError(Exception):
+    pass
+
+
+def _alarm_handler(signum, frame):
+    raise _ImageTimeoutError("görsel işleme zaman aşımına uğradı")
+
+
+def _to_pil_with_timeout(image_like, timeout_seconds: int = 20) -> Image.Image:
+    """`_to_pil`'i bir zaman aşımıyla sarmalar. Bazı bozuk/anormal görsel dosyaları
+    (ör. hasarlı JPEG başlığı) PIL'in kod çözücüsünü ÇOK YAVAŞLATABİLİR ya da neredeyse
+    sonsuz döngüye sokabilir; bu durumda süreç görünürde "donmuş" gibi kalır. `signal.alarm`
+    (yalnızca Unix/Linux'ta çalışır — proje zaten yalnızca Colab'da çalıştırıldığı için bu
+    yeterlidir) belirtilen süre sonunda kesme sinyali göndererek işlemi durdurur, böylece
+    tek bir sorunlu dosya tüm veri hazırlama sürecini kilitleyemez."""
+    old_handler = signal.signal(signal.SIGALRM, _alarm_handler)
+    signal.alarm(timeout_seconds)
+    try:
+        return _to_pil(image_like)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +320,7 @@ def load_smhd() -> list[dict]:
             if not clean_text:
                 continue
             try:
-                image = _to_pil(img_path)
+                image = _to_pil_with_timeout(img_path)
             except KeyboardInterrupt:
                 raise
             except Exception as e:
