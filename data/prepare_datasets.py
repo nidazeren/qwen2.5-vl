@@ -35,7 +35,9 @@ Bu script yalnızca Colab'da (Drive bağlıyken) veya internet erişimi olan bir
 import io
 import json
 import random
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -235,6 +237,22 @@ def load_handwriting_synthetic() -> list[dict]:
     return records
 
 
+def _local_scratch_copy(drive_dir: Path, cache_name: str) -> Path:
+    """Drive'da (yavaş, FUSE mount) bulunan ve çok sayıda küçük dosya içeren bir klasörü,
+    HIZLI yerel diske (Colab'da /tmp altı) BİR KEZ kopyalar; kopya zaten varsa tekrar
+    kopyalamaz. SMHD gibi yüzlerce küçük görsel+metin dosyası içeren kaynaklarda, her
+    dosyayı tek tek Drive üzerinden okumak (rglob + exists + open) dakikalarca sürebilir;
+    tek seferlik toplu kopyalama (shutil.copytree) sonrasında okuma yerel diskten yapılır."""
+    local_root = Path(tempfile.gettempdir()) / "qwen_ocr_local_cache" / cache_name
+    if local_root.exists() and any(local_root.iterdir()):
+        print(f"      Yerel önbellek zaten mevcut, kopyalama atlanıyor: {local_root}")
+        return local_root
+    print(f"      {drive_dir} -> {local_root} yerel diske kopyalanıyor (bir kereye mahsus, biraz sürebilir)...")
+    shutil.copytree(drive_dir, local_root, dirs_exist_ok=True)
+    print("      Kopyalama tamamlandı.")
+    return local_root
+
+
 # ---------------------------------------------------------------------------
 # 4) SMHD — gerçek (ama İngilizce) el yazısı, manuel/izinli dağıtım
 # ---------------------------------------------------------------------------
@@ -243,15 +261,16 @@ def load_smhd() -> list[dict]:
         print("[4/5] SMHD atlandı (config.USE_SMHD=False).")
         return []
 
-    root = config.SMHD_LOCAL_DIR
-    if not root.exists() or not any(root.iterdir()):
+    drive_root = config.SMHD_LOCAL_DIR
+    if not drive_root.exists() or not any(drive_root.iterdir()):
         print(
-            f"      !! config.USE_SMHD=True ama {root} boş/yok. SMHD atlanıyor. "
+            f"      !! config.USE_SMHD=True ama {drive_root} boş/yok. SMHD atlanıyor. "
             "İzin formu ve indirme talimatı için README.md 'SMHD erişimi' bölümüne bakın."
         )
         return []
 
-    print(f"[4/5] SMHD yerel klasörden okunuyor: {root}")
+    print(f"[4/5] SMHD okunuyor (kaynak: {drive_root})")
+    root = _local_scratch_copy(drive_root, "SMHD")
     records = []
     # Beklenen yapı: root/<kategori>/<belge_adı>.png (veya .jpg) + eşlenik .txt transkripsiyon.
     for img_path in list(root.rglob("*.png")) + list(root.rglob("*.jpg")) + list(root.rglob("*.jpeg")):
@@ -294,23 +313,39 @@ def _maybe_subsample(records: list[dict], rng: random.Random) -> list[dict]:
     return rng.sample(records, config.PILOT_SAMPLES_PER_SOURCE)
 
 
+def _save_step(name: str, loader_fn, rng: random.Random) -> None:
+    """Bir kaynağı yükler ve HEMEN diske kaydeder — main() sonuna kadar BEKLEMEZ.
+    Böylece bir sonraki kaynak yüklenirken kesinti/hata olsa bile (ör. yavaş Drive
+    I/O nedeniyle elle durdurma), bu adıma kadar tamamlanmış kaynaklar KAYBOLMAZ.
+    Kaynak zaten diskte varsa (önceki bir çalıştırmadan kalma) tekrar indirilmez —
+    bu hem zaman kazandırır hem de kesintiden sonra kaldığı yerden devam edilmesini sağlar."""
+    out_dir = config.RAW_DATA_DIR / name
+    if out_dir.exists():
+        print(f"[skip] {name} zaten diskte mevcut ({out_dir}); yeniden indirilmiyor. "
+              "Yeniden üretmek isterseniz bu klasörü silip tekrar çalıştırın.")
+        return
+    records = _maybe_subsample(loader_fn(), rng)
+    if records:
+        io_utils.save_ocr_records(records, name)
+    else:
+        print(f"      {name} için 0 kayıt bulundu, diske yazılmadı.")
+
+
 def main() -> None:
     config.ensure_directories()
     rng = random.Random(config.RANDOM_SEED)
 
-    printed = _maybe_subsample(load_printed_synthetic(), rng)
-    scene = _maybe_subsample(load_scene_text(), rng)
-    handwriting_synth = _maybe_subsample(load_handwriting_synthetic(), rng)
-    smhd = _maybe_subsample(load_smhd(), rng)
-    replay_images = load_replay_source_images()  # replay'de zaten ayrı örnekleme yapılıyor
+    _save_step("printed_synthetic", load_printed_synthetic, rng)
+    _save_step("scene_text", load_scene_text, rng)
+    _save_step("handwriting_synthetic", load_handwriting_synthetic, rng)
+    _save_step("smhd_english", load_smhd, rng)
 
-    io_utils.save_ocr_records(printed, "printed_synthetic")
-    if scene:
-        io_utils.save_ocr_records(scene, "scene_text")
-    io_utils.save_ocr_records(handwriting_synth, "handwriting_synthetic")
-    if smhd:
-        io_utils.save_ocr_records(smhd, "smhd_english")
-    io_utils.save_image_index(replay_images, "omnidocbench_replay_source")
+    replay_index_path = config.RAW_DATA_DIR / "omnidocbench_replay_source.jsonl"
+    if replay_index_path.exists():
+        print(f"[skip] omnidocbench_replay_source zaten diskte mevcut ({replay_index_path}).")
+    else:
+        replay_images = load_replay_source_images()  # replay'de zaten ayrı örnekleme yapılıyor
+        io_utils.save_image_index(replay_images, "omnidocbench_replay_source")
 
     print("\nTüm kaynaklar hazırlandı. Sıradaki adım: data/replay_generation.py "
           "(self-distillation) ve ardından data/build_chat_dataset.py.")
