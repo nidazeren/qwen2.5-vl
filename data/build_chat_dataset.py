@@ -37,8 +37,11 @@ from data import io_utils, prompts  # noqa: E402
 
 import datasets  # type: ignore
 
-OCR_SOURCE_NAMES = ["printed_synthetic", "scene_text", "handwriting_synthetic"] + (
-    ["smhd_english"] if config.USE_SMHD else []
+OCR_SOURCE_NAMES = (
+    ["printed_synthetic"]
+    + (["scene_text"] if config.USE_SCENE_TEXT else [])
+    + ["handwriting_synthetic"]
+    + (["smhd_english"] if config.USE_SMHD else [])
 )
 REPLAY_OCR_NAME = "replay_ocr"
 REPLAY_GENERAL_NAME = "replay_general"

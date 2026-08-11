@@ -49,10 +49,24 @@ notebooks/01_full_training_a100.ipynb    A100: tam veri, tam eğitim.
 | Kaynak | Nereden | Not |
 |---|---|---|
 | `esengul3/turkish-word-ocr` | HuggingFace Hub | Sentetik, basılı, 250K Türkçe kelime görseli. |
-| TS-TR (sahne metni) | Kaggle (`serdaryildiz/...`) | Gerçek sahne fotoğrafları; **Kaggle API kimlik bilgisi gerekir** (aşağıya bakın). |
+| TS-TR (sahne metni) | Kaggle (`serdaryildiz/...`) | Gerçek sahne fotoğrafları; Kaggle API kimlik bilgisi gerektirir. **Varsayılan olarak KAPALI** (`USE_SCENE_TEXT=False`) — aşağıya bakın. |
 | `emredeveloper/turkish-ocr` | HuggingFace Hub | Türkçe, %70 el yazısı stilinde render edilmiş sentetik veri. |
 | SMHD | GitHub (`hiqmatNisa/SMHD`) | **Gerçek ama İNGİLİZCE el yazısı**, izin formu gerektirir (aşağıya bakın). Varsayılan olarak KAPALI (`USE_SMHD=False`). |
 | `opendatalab/OmniDocBench` | HuggingFace Hub | Yalnızca GÖRSEL kaynağı olarak (self-distillation replay için); etiketleri kullanılmaz. |
+
+### Neden TS-TR (Kaggle) varsayılan olarak kapalı?
+
+Kaggle API kimlik bilgisi kurulumu (kaggle.json indirme/Colab Secrets) bazı ortamlarda
+sorun çıkarabildiğinden, `configs/config.py` içinde `USE_SCENE_TEXT=False` (varsayılan)
+iken bu kaynak **tamamen atlanır** — Kaggle'a hiç bağlanılmaz, kimlik bilgisi gerekmez.
+"%40 basılı" payının tamamı otomatik olarak `esengul3/turkish-word-ocr`'a kayar
+(bkz. `compute_bucket_target_sizes`), pipeline eksiksiz çalışır.
+
+**TS-TR'yi (gerçek sahne metni) sonradan eklemek isterseniz:**
+1. `configs/config.py` içinde `USE_SCENE_TEXT = True` yapın.
+2. Kaggle API kimlik bilgisi kurun (aşağıdaki "Kaggle API kimlik bilgisi" bölümü).
+3. Değişikliği GitHub'a push edip Colab'da `git pull` çekip veri hazırlama adımlarını
+   tekrar çalıştırın.
 
 ### Neden SMHD varsayılan olarak kapalı?
 
@@ -75,12 +89,14 @@ Bu veri İngilizce olduğundan, amacı Türkçe metin öğretmek DEĞİL, modele
 el yazısı çizgi çeşitliliğine karşı ek sağlamlık kazandırmaktır (bkz. config.py'deki
 `HANDWRITING_SYNTH_VS_SMHD_RATIO`).
 
-### Kaggle API kimlik bilgisi (TS-TR için)
+### Kaggle API kimlik bilgisi (yalnızca USE_SCENE_TEXT=True yaparsanız gerekir)
 
 1. https://www.kaggle.com adresinde hesabınıza girin -> **Settings > API > Create New Token**.
-2. İnen `kaggle.json` dosyasını `notebooks/00_pilot_t4_setup_eda.ipynb`'nin ilgili
-   hücresinde yükleyin (bir kez yaparsanız, notebook onu Drive'a kaydeder ve sonraki
-   çalıştırmalarda otomatik kullanır).
+2. Ya `kaggle.json` dosyasını `notebooks/00_pilot_t4_setup_eda.ipynb`'nin ilgili
+   hücresinde yükleyin, ya da (indirme sorun çıkarırsa) Colab'ın sol kenar çubuğundaki
+   **Secrets (🔑)** panelinden `KAGGLE_USERNAME`/`KAGGLE_KEY` ekleyin — hücre ikisini de
+   otomatik dener. Bir kez yaparsanız notebook Drive'a kaydeder, sonraki çalıştırmalarda
+   tekrar istemez.
 
 TS-TR'nin iç klasör/etiket formatı Kaggle'da ayrıntılı belgelenmediğinden,
 `data/prepare_datasets.py` bunu OTOMATİK ALGILAMAYA çalışır (yaygın `gt.txt`/`labels.txt`/
@@ -93,14 +109,15 @@ doldurmanızı ister (tek seferlik, elle bir müdahale).
 `configs/config.py` içinde merkezi olarak tanımlıdır ve `compute_bucket_target_sizes()`
 ile her kaynağın tam hedef örnek sayısına dönüştürülür:
 
-- **%40 basılı**: `esengul3` (sentetik, %70) + TS-TR (gerçek sahne metni, %30)
+- **%40 basılı**: `esengul3` (sentetik, varsayılan %100) [+ TS-TR (gerçek sahne metni, %30), yalnızca `USE_SCENE_TEXT=True` iken]
 - **%35 el yazısı**: `turkish-ocr` (Türkçe, sentetik el yazısı stili) [+ SMHD, opsiyonel]
 - **%25 replay** (self-distillation): OCR-replay (%60) + genel-görev replay (%40)
 
 > Kullanıcının orijinal isteğinde TS-TR'ye ayrı bir yüzde verilmemişti; en mantıklı
 > yorum olarak "%40 basılı" kovasına esengul3 ile birlikte dahil edildi (ikisi de
 > dizgi/basılı karakter içerir, el yazısı değildir). `PRINTED_SYNTH_VS_SCENE_RATIO`
-> ile bu alt-oranı değiştirebilirsiniz.
+> ile bu alt-oranı değiştirebilirsiniz. TS-TR varsayılan olarak KAPALI olduğundan
+> (`USE_SCENE_TEXT=False`), bu kova şu an tamamen `esengul3`'ten geliyor.
 
 ## LoRA Tasarımı
 

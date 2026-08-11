@@ -117,7 +117,11 @@ PRINTED_SYNTHETIC_HF_ID = "esengul3/turkish-word-ocr"
 
 # (b) Gerçek Türkçe sahne metni (Scene Text Recognition) — sadece Kaggle'da barındırılıyor.
 #     Kaggle API kimlik bilgisi (kaggle.json) gerektirir; bkz. README.md "Kaggle erişimi".
+#     USE_SCENE_TEXT=False iken bu kaynak TAMAMEN atlanır (Kaggle kimlik bilgisi de
+#     gerekmez) ve payı PRINTED_SYNTHETIC_HF_ID'ye kayar (bkz. compute_bucket_target_sizes) —
+#     kod bu durumda da hatasız çalışır.
 SCENE_TEXT_KAGGLE_SLUG = "serdaryildiz/turkish-scene-text-recognition-dataset"
+USE_SCENE_TEXT = False  # Kaggle kimlik bilgisi kurmak istemiyorsanız False bırakın.
 
 # (c) Türkçe dilinde, el yazısı STİLİNDE render edilmiş sentetik veri — HuggingFace Hub.
 #     %70 el yazısı stili + %30 basılı içerir (prepare_datasets.py sadece el yazısı
@@ -149,7 +153,8 @@ MIXTURE_REPLAY = 0.25
 # tanımlanmıştı; TS-TR (gerçek sahne metni) ayrı bir yüzdeye sahip değildi. En mantıklı
 # yorum: TS-TR de "basılı/dizgi karakterli" bir kaynak olduğundan (el yazısı değil, gerçek
 # fotoğraflarda dizgi/tabela yazısı) bu kovaya esengul3 ile birlikte girer. Aşağıdaki
-# alt-oran bunu kontrol eder; isterseniz değiştirin.
+# alt-oran bunu kontrol eder; isterseniz değiştirin. USE_SCENE_TEXT=False iken (varsayılan)
+# bu oran YOK SAYILIR ve kova tamamen esengul3'e gider (Kaggle gerekmez).
 PRINTED_SYNTH_VS_SCENE_RATIO = 0.70  # 0.70 esengul3 (sentetik), 0.30 TS-TR (gerçek sahne)
 
 # "%35 el yazısı" kovası: USE_SMHD=True ise iki kaynak arasında bölünür; USE_SMHD=False
@@ -182,11 +187,12 @@ def compute_bucket_target_sizes(total: int | None = None) -> dict:
     handwriting_total = total * MIXTURE_HANDWRITING
     replay_total = total * MIXTURE_REPLAY
 
+    printed_synth_ratio = 1.0 if not USE_SCENE_TEXT else PRINTED_SYNTH_VS_SCENE_RATIO
     handwriting_synth_ratio = 1.0 if not USE_SMHD else HANDWRITING_SYNTH_VS_SMHD_RATIO
 
     return {
-        "printed_synthetic": round(printed_total * PRINTED_SYNTH_VS_SCENE_RATIO),
-        "scene_text": round(printed_total * (1 - PRINTED_SYNTH_VS_SCENE_RATIO)),
+        "printed_synthetic": round(printed_total * printed_synth_ratio),
+        "scene_text": round(printed_total * (1 - printed_synth_ratio)) if USE_SCENE_TEXT else 0,
         "handwriting_synthetic": round(handwriting_total * handwriting_synth_ratio),
         "smhd_english": round(handwriting_total * (1 - handwriting_synth_ratio)) if USE_SMHD else 0,
         "replay_ocr": round(replay_total * REPLAY_OCR_VS_GENERAL_RATIO),

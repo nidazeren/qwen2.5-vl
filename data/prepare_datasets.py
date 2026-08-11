@@ -167,6 +167,10 @@ def _discover_ts_tr_annotations(root: Path) -> list[dict]:
 
 
 def load_scene_text() -> list[dict]:
+    if not config.USE_SCENE_TEXT:
+        print("[2/5] TS-TR atlandı (config.USE_SCENE_TEXT=False, Kaggle gerekmez).")
+        return []
+
     print(f"[2/5] TS-TR ({config.SCENE_TEXT_KAGGLE_SLUG}) Kaggle'dan indiriliyor...")
     import kagglehub  # type: ignore
 
@@ -292,7 +296,8 @@ def main() -> None:
     replay_images = load_replay_source_images()  # replay'de zaten ayrı örnekleme yapılıyor
 
     io_utils.save_ocr_records(printed, "printed_synthetic")
-    io_utils.save_ocr_records(scene, "scene_text")
+    if scene:
+        io_utils.save_ocr_records(scene, "scene_text")
     io_utils.save_ocr_records(handwriting_synth, "handwriting_synthetic")
     if smhd:
         io_utils.save_ocr_records(smhd, "smhd_english")
