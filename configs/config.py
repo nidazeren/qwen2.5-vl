@@ -52,11 +52,16 @@ DRIVE_ROOT = Path(
 # taşması, bağlantı kopması, elle yeniden başlatma) TAMAMEN SİLİNİR. Bu hem indirilen
 # ~7,5 GB'lık model ağırlıklarının HER SEFERİNDE yeniden inmesine yol açar, hem de
 # data/prepare_datasets.py'nin Drive'a kaydettiği dosya YOLLARININ (ör. OmniDocBench
-# görselleri) bir sonraki oturumda geçersiz kalmasına neden olur. `setdefault` kullanılır
-# ki kullanıcı isterse ortam değişkeniyle override edebilsin. Bu satır, herhangi bir
-# `transformers`/`datasets`/`huggingface_hub` içe aktarımından ÖNCE çalışmalıdır — bu
-# yüzden config.py'nin en başında, DRIVE_ROOT tanımlanır tanımlanmaz yapılır.
-os.environ.setdefault("HF_HOME", str(DRIVE_ROOT / "hf_cache"))
+# görselleri) bir sonraki oturumda geçersiz kalmasına neden olur.
+#
+# BİLEREK `os.environ[...] = ...` (setdefault DEĞİL) kullanılıyor: Colab'ın kendi
+# ortamı `HF_HOME`'u ÖNCEDEN (bizim kodumuzdan bağımsız olarak) ayarlamış olabilir —
+# bu durumda `setdefault` sessizce hiçbir şey yapmaz ve indirmeler yine geçici diske
+# gider. Kesin/koşulsuz atama, Drive yönlendirmesinin HER ZAMAN devreye girmesini
+# garanti eder. Bu satır, herhangi bir `transformers`/`datasets`/`huggingface_hub`
+# içe aktarımından ÖNCE çalışmalıdır — bu yüzden config.py'nin en başında, DRIVE_ROOT
+# tanımlanır tanımlanmaz yapılır.
+os.environ["HF_HOME"] = str(DRIVE_ROOT / "hf_cache")
 
 # Ham/indirilen veri setlerinin önbelleklendiği klasör (HF datasets cache, Kaggle indirmeleri,
 # replay_generation.py çıktısı dahil — replay_ocr/replay_general de birer "ham kaynak"
