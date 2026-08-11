@@ -297,45 +297,72 @@ def load_smhd() -> list[dict]:
 
     print(f"[4/5] SMHD okunuyor (kaynak: {drive_root})")
     root = _local_scratch_copy(drive_root, "SMHD")
-    records = []
+
+    # KALICI (checkpoint) İLERLEME: Colab oturumlarında bu döngü, nedeni bu makineden
+    # görülemeyen tekrarlayan bir kesme sinyaliyle (KeyboardInterrupt) erken sonlanabiliyor.
+    # Bu yüzden her görsel BAŞARIYLA doğrulandığı ANDA (metniyle birlikte) küçük bir
+    # checkpoint dosyasına yazılır ve HEMEN diske temizlenir (flush). Bir kesinti olursa,
+    # bir SONRAKİ çalıştırma daha önce doğrulanmış görselleri (zaman aşımı sarmalayıcısı
+    # OLMADAN, çünkü zaten bir kez başarıyla açıldıkları biliniyor) hızlıca yeniden açar ve
+    # yalnızca HENÜZ doğrulanmamış görselleri işler — böylece her deneme bir öncekinden
+    # daha ileri gider, sıfırdan başlamaz.
+    checkpoint_path = Path(tempfile.gettempdir()) / "qwen_ocr_local_cache" / "smhd_checkpoint.jsonl"
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    validated: dict[str, str] = {}
+    if checkpoint_path.exists():
+        with open(checkpoint_path, "r", encoding="utf-8") as f:
+            for line in f:
+                item = json.loads(line)
+                validated[item["image_path"]] = item["text"]
+        print(f"      Önceki bir çalıştırmadan {len(validated)} doğrulanmış kayıt bulundu (checkpoint).")
+
     # Beklenen yapı: root/<kategori>/<belge_adı>.png (veya .jpg) + eşlenik .txt transkripsiyon.
     image_paths = list(root.rglob("*.png")) + list(root.rglob("*.jpg")) + list(root.rglob("*.jpeg"))
-    # tqdm ile ilerleme çubuğu: yüzlerce taranmış belge görselini RGB'ye çevirmek (_to_pil)
-    # birkaç dakika sürebilir; ilerleme görünmezse "takıldı" sanılıp erken durdurulabilir.
-    #
-    # NOT: Bu döngü KeyboardInterrupt'a karşı KORUMALIDIR. Colab oturumlarında (sebebi
-    # bu makineden görülemeyen bir nedenle — yanlışlıkla "Durdur" tıklaması, bağlantı
-    # kesintisi vb.) döngü ortasında gerçek bir kesme sinyali gelebiliyor. Kesinti
-    # gelirse, o ana kadar başarıyla işlenmiş kayıtlar KAYBOLMADAN döndürülür — aksi
-    # halde tüm SMHD ilerlemesi her seferinde sıfırlanırdı.
-    try:
-        for img_path in tqdm(image_paths, desc="      SMHD görselleri işleniyor"):
-            txt_path = img_path.with_suffix(".txt")
-            if not txt_path.exists():
-                continue
-            raw_text = txt_path.read_text(encoding="utf-8", errors="ignore")
-            # SMHD dokümantasyonuna göre üstü çizilmiş/silinmiş içerik '#' ile işaretlenir;
-            # OCR hedefi olarak yalnızca OKUNABİLİR (üstü çizilmemiş) metni istiyoruz.
-            clean_text = " ".join(tok for tok in raw_text.split() if not tok.startswith("#")).strip()
-            if not clean_text:
-                continue
-            try:
-                image = _to_pil_with_timeout(img_path)
-            except KeyboardInterrupt:
-                raise
-            except Exception as e:
-                # Tek bir bozuk/okunamayan görsel yüzünden TÜM SMHD yüklemesinin çökmesini
-                # önlemek için bu görsel atlanır; hangi dosyanın sorunlu olduğu ekrana yazdırılır.
-                print(f"      !! {img_path.name} okunamadı, atlanıyor: {e}")
-                continue
-            records.append({"image": image, "text": clean_text, "source": "smhd_english"})
-    except KeyboardInterrupt:
-        print(
-            f"\n      !! Kesme sinyali alındı ({len(records)} kayıt bu ana kadar işlendi); "
-            "bu kayıtlar KAYBEDİLMEDEN kaydediliyor. Kalan görseller için scripti tekrar "
-            "çalıştırabilirsiniz (mevcut smhd_english klasörünü silip yeniden çalıştırmanız "
-            "gerekir çünkü bu kaynak parça parça değil tek seferde kaydedilir)."
-        )
+
+    records = []
+    with open(checkpoint_path, "a", encoding="utf-8") as checkpoint_file:
+        try:
+            for img_path in tqdm(image_paths, desc="      SMHD görselleri işleniyor"):
+                key = str(img_path)
+                already_validated = key in validated
+
+                if already_validated:
+                    clean_text = validated[key]
+                else:
+                    txt_path = img_path.with_suffix(".txt")
+                    if not txt_path.exists():
+                        continue
+                    raw_text = txt_path.read_text(encoding="utf-8", errors="ignore")
+                    # SMHD dokümantasyonuna göre üstü çizilmiş/silinmiş içerik '#' ile
+                    # işaretlenir; OCR hedefi olarak yalnızca OKUNABİLİR metni istiyoruz.
+                    clean_text = " ".join(
+                        tok for tok in raw_text.split() if not tok.startswith("#")
+                    ).strip()
+                    if not clean_text:
+                        continue
+
+                try:
+                    # Daha önce doğrulanmış görseller için zaman aşımı sarmalayıcısına
+                    # gerek yok (zaten bir kez başarıyla açıldığı biliniyor) — bu hem
+                    # gereksiz sinyal kurulum/kaldırma maliyetini azaltır hem de döngüyü
+                    # hızlandırır.
+                    image = _to_pil(img_path) if already_validated else _to_pil_with_timeout(img_path)
+                except KeyboardInterrupt:
+                    raise
+                except Exception as e:
+                    print(f"      !! {img_path.name} okunamadı, atlanıyor: {e}")
+                    continue
+
+                if not already_validated:
+                    checkpoint_file.write(json.dumps({"image_path": key, "text": clean_text}) + "\n")
+                    checkpoint_file.flush()
+                records.append({"image": image, "text": clean_text, "source": "smhd_english"})
+        except KeyboardInterrupt:
+            print(
+                f"\n      !! Kesme sinyali alındı ({len(records)} kayıt bu ana kadar işlendi); "
+                "doğrulanmış kayıtlar checkpoint dosyasında güvende. Scripti TEKRAR "
+                "çalıştırın — bir önceki ilerlemeden devam edecektir."
+            )
 
     print(f"      -> {len(records)} örnek yüklendi.")
     return records
@@ -365,14 +392,19 @@ def _maybe_subsample(records: list[dict], rng: random.Random) -> list[dict]:
     return rng.sample(records, config.PILOT_SAMPLES_PER_SOURCE)
 
 
-def _save_step(name: str, loader_fn, rng: random.Random) -> None:
+def _save_step(name: str, loader_fn, rng: random.Random, skip_if_exists: bool = True) -> None:
     """Bir kaynağı yükler ve HEMEN diske kaydeder — main() sonuna kadar BEKLEMEZ.
     Böylece bir sonraki kaynak yüklenirken kesinti/hata olsa bile (ör. yavaş Drive
     I/O nedeniyle elle durdurma), bu adıma kadar tamamlanmış kaynaklar KAYBOLMAZ.
-    Kaynak zaten diskte varsa (önceki bir çalıştırmadan kalma) tekrar indirilmez —
-    bu hem zaman kazandırır hem de kesintiden sonra kaldığı yerden devam edilmesini sağlar."""
+
+    `skip_if_exists=True` (varsayılan): kaynak zaten diskte varsa tekrar indirilmez —
+    bu hem zaman kazandırır hem de kesintiden sonra kaldığı yerden devam edilmesini
+    sağlar. `skip_if_exists=False`: SMHD gibi KENDİ checkpoint mekanizması olan
+    kaynaklar için kullanılır — bu kaynaklarda "diskte var" durumu KISMİ (kesintiye
+    uğramış) bir kayıt olabilir; bu yüzden her seferinde yeniden çalıştırılır (kendi
+    checkpoint'i sayesinde bu hızlıdır) ve daha eksiksiz bir sonuçla ÜZERİNE YAZILIR."""
     out_dir = config.RAW_DATA_DIR / name
-    if out_dir.exists():
+    if skip_if_exists and out_dir.exists():
         print(f"[skip] {name} zaten diskte mevcut ({out_dir}); yeniden indirilmiyor. "
               "Yeniden üretmek isterseniz bu klasörü silip tekrar çalıştırın.")
         return
@@ -390,7 +422,7 @@ def main() -> None:
     _save_step("printed_synthetic", load_printed_synthetic, rng)
     _save_step("scene_text", load_scene_text, rng)
     _save_step("handwriting_synthetic", load_handwriting_synthetic, rng)
-    _save_step("smhd_english", load_smhd, rng)
+    _save_step("smhd_english", load_smhd, rng, skip_if_exists=False)
 
     replay_index_path = config.RAW_DATA_DIR / "omnidocbench_replay_source.jsonl"
     if replay_index_path.exists():
