@@ -260,8 +260,9 @@ MERGER_LORA_ALPHA = 16
 
 # embed_tokens LoRA'sı: SADECE analysis/tokenizer_analysis.py raporu Türkçe karakterlerin
 # aşırı parçalandığını gösterirse elle True yapılması önerilir (bkz. rapor çıktısındaki
-# öneri satırı). Varsayılan olarak kapalıdır.
-ENABLE_EMBED_LORA = False
+# öneri satırı). Pilot EDA'sında fragmentation_ratio=1.1814 (eşik: 1.15) ÖLÇÜLDÜ ve
+# script bu ayarı açıkça önerdi; bu yüzden burada True yapıldı.
+ENABLE_EMBED_LORA = True
 EMBED_LORA_R = 8
 EMBED_LORA_ALPHA = 16
 
