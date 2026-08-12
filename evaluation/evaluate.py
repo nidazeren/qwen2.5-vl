@@ -113,7 +113,9 @@ def evaluate_test_b(model, processor, tag: str) -> dict:
     ds = build_test_sets.load_test_b()
     checkpoint_path = _checkpoint_path(tag, "test_b")
     hypotheses = _generate_for_dataset(model, processor, ds, "Test Seti B", checkpoint_path)
-    references = ds["answer"]
+    # list(...) ZORUNLU: `datasets` kütüphanesi ds["answer"] için düz bir Python list
+    # DEĞİL, bir `Column` nesnesi döndürüyor; `jiwer` yalnızca str/list[str] kabul eder.
+    references = list(ds["answer"])
     ocr_metrics = metrics.compute_ocr_metrics(references, hypotheses)
     return {"n_examples": len(ds), **ocr_metrics}
 
