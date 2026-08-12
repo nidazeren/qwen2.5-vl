@@ -66,9 +66,19 @@ def _load_and_shuffle(name: str) -> datasets.Dataset:
 
 
 def _take(ds: datasets.Dataset, n: int) -> tuple[datasets.Dataset, datasets.Dataset]:
-    """Baştan n örneği ayırır; (alınan, kalan) döner. `n`, ds boyutunu aşarsa tüm ds alınır."""
+    """Baştan n örneği ayırır; (alınan, kalan) döner. `n`, ds boyutunu aşarsa tüm ds alınır.
+
+    NOT: `datasets` kütüphanesinde `Dataset.select(range(start, stop))`, `start == len(ds)`
+    olduğunda -- seçilecek 0 eleman olsa bile -- `IndexError` fırlatır (başlangıç indeksinin
+    kendisi geçerli bir indeks olmadığı için; bkz. `_check_valid_indices_value`). Bu, `n`
+    havuzun TAM boyutuna eşit olduğunda ("kalan" kısım boş) veya `n=0` iken ("alınan" kısım
+    boş) tetiklenir. Bu yüzden boş bir dilim gerektiğinde `range(...)` yerine doğrudan boş
+    bir liste (`[]`) ile seçim yapılır -- bu, kütüphanenin boş girdilerde güvenli olan farklı
+    bir kod yoluna girmesini sağlar."""
     n = min(n, len(ds))
-    return ds.select(range(n)), ds.select(range(n, len(ds)))
+    taken = ds.select(range(n)) if n > 0 else ds.select([])
+    remaining = ds.select(range(n, len(ds))) if n < len(ds) else ds.select([])
+    return taken, remaining
 
 
 def _sample_with_replacement(ds: datasets.Dataset, n: int, rng: random.Random) -> datasets.Dataset:
