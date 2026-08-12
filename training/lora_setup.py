@@ -67,7 +67,23 @@ def select_dtype_and_attn_impl() -> tuple[torch.dtype, str]:
 def load_base_model_and_processor(load_in_4bit: bool = False):
     """Temel modeli ve processor'ı yükler. `load_in_4bit=True` (pilot/T4 için) iken
     bitsandbytes ile 4-bit nicemleme uygulanır; bu durumda döndürülen model
-    `prepare_model_for_kbit_training` ile LoRA eğitimine hazır hale getirilir."""
+    `prepare_model_for_kbit_training` ile LoRA eğitimine hazır hale getirilir.
+
+    bitsandbytes 4-bit nicemleme yalnızca CUDA GPU'da çalışır. GPU yoksa (ör. Colab
+    GPU kotası dolduğunda "GPU'suz devam et" seçilirse) `load_in_4bit=True` isteği
+    SESSİZCE yoksayılır ve tam hassasiyete (fp32) düşülür — aksi halde bitsandbytes
+    çökerdi. Not: CPU'da bu 3B parametreli VLM'nin görsel-dil üretimi (generation)
+    PRATİK DEĞİLDİR (tek görsel için dakikalar sürebilir); bu yalnızca GPU yokken
+    kodun ÇÖKMEDEN çalışmasını garanti eder, hızlı bir alternatif sunmaz.
+    """
+    if load_in_4bit and not torch.cuda.is_available():
+        print(
+            "[lora_setup] !! GPU bulunamadı; 4-bit nicemleme (bitsandbytes) yalnızca "
+            "CUDA'da çalışır. fp32'ye düşülüyor. UYARI: CPU'da bu model ile üretim "
+            "(generation) ÇOK YAVAŞTIR, pratik bir seçenek değildir."
+        )
+        load_in_4bit = False
+
     dtype, attn_impl = select_dtype_and_attn_impl()
     print(f"[lora_setup] Seçilen dtype={dtype}, attn_implementation={attn_impl}, 4bit={load_in_4bit}")
 
