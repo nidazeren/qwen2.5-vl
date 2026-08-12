@@ -32,17 +32,59 @@ from training.inference_utils import generate_batch  # noqa: E402
 from tqdm import tqdm  # type: ignore
 
 
-def _generate_for_dataset(model, processor, ds, desc: str) -> list[str]:
-    hypotheses = []
-    for row in tqdm(ds, desc=desc):
-        hyp = generate_batch(model, processor, [row["image"]], [row["instruction"]])[0]
-        hypotheses.append(hyp)
+def _checkpoint_path(tag: str, split_name: str) -> Path:
+    """Her (tag, split) çifti için AYRI bir checkpoint dosyası: farklı bir etiketle
+    (ör. 'epoch_1') yapılan bir değerlendirme, farklı bir model durumuna ait olduğu
+    için 'baseline' checkpoint'iyle asla karışmamalı."""
+    path = config.EVAL_OUTPUT_DIR / "checkpoints" / f"{tag}_{split_name}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _load_checkpoint(path: Path) -> dict[int, str]:
+    if not path.exists():
+        return {}
+    entries: dict[int, str] = {}
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            entries[rec["index"]] = rec["hypothesis"]
+    return entries
+
+
+def _generate_for_dataset(model, processor, ds, desc: str, checkpoint_path: Path) -> list[str]:
+    """Test A (157) + Test B (200) örneği tek seferde üretmek T4'te uzun sürebilir;
+    bağlantı kopması gibi bir kesinti TÜM ilerlemeyi kaybettirmesin diye her üretilen
+    hipotez, üretilir üretilmez Drive'daki (KALICI) bir .jsonl checkpoint dosyasına
+    satır satır yazılıp flush edilir. Script yeniden başlatıldığında, checkpoint'te
+    zaten bulunan indeksler ATLANIR (bkz. replay_generation.py'deki aynı desen)."""
+    done = _load_checkpoint(checkpoint_path)
+    if done:
+        print(
+            f"      Önceki bir çalıştırmadan {len(done)} doğrulanmış '{desc}' "
+            "kaydı bulundu (checkpoint); bunlar yeniden üretilmeyecek."
+        )
+
+    hypotheses: list[str] = [""] * len(ds)
+    with open(checkpoint_path, "a", encoding="utf-8") as checkpoint_file:
+        for i, row in enumerate(tqdm(ds, desc=desc)):
+            if i in done:
+                hypotheses[i] = done[i]
+                continue
+            hyp = generate_batch(model, processor, [row["image"]], [row["instruction"]])[0]
+            hypotheses[i] = hyp
+            checkpoint_file.write(json.dumps({"index": i, "hypothesis": hyp}) + "\n")
+            checkpoint_file.flush()
     return hypotheses
 
 
-def evaluate_test_a(model, processor) -> dict:
+def evaluate_test_a(model, processor, tag: str) -> dict:
     ds = build_test_sets.load_test_a()
-    hypotheses = _generate_for_dataset(model, processor, ds, "Test Seti A")
+    checkpoint_path = _checkpoint_path(tag, "test_a")
+    hypotheses = _generate_for_dataset(model, processor, ds, "Test Seti A", checkpoint_path)
     references = ds["answer"]
     sources = ds["source"]
 
@@ -67,9 +109,10 @@ def evaluate_test_a(model, processor) -> dict:
     }
 
 
-def evaluate_test_b(model, processor) -> dict:
+def evaluate_test_b(model, processor, tag: str) -> dict:
     ds = build_test_sets.load_test_b()
-    hypotheses = _generate_for_dataset(model, processor, ds, "Test Seti B")
+    checkpoint_path = _checkpoint_path(tag, "test_b")
+    hypotheses = _generate_for_dataset(model, processor, ds, "Test Seti B", checkpoint_path)
     references = ds["answer"]
     ocr_metrics = metrics.compute_ocr_metrics(references, hypotheses)
     return {"n_examples": len(ds), **ocr_metrics}
@@ -81,8 +124,8 @@ def evaluate_all(model, processor, tag: str) -> dict:
     print(f"[evaluate] '{tag}' etiketiyle değerlendirme başlıyor...")
     result = {
         "tag": tag,
-        "test_a": evaluate_test_a(model, processor),
-        "test_b": evaluate_test_b(model, processor),
+        "test_a": evaluate_test_a(model, processor, tag),
+        "test_b": evaluate_test_b(model, processor, tag),
     }
     out_path = config.EVAL_OUTPUT_DIR / f"{tag}.json"
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
