@@ -21,6 +21,7 @@ NOT: Bu script, eğitimden ÖNCE, BİR KEZ çalıştırılır (train_sft.py sır
 Üretilen pseudo-label'lar RAW_DATA_DIR altına kalıcı olarak kaydedilir.
 """
 
+import json
 import random
 import sys
 from pathlib import Path
@@ -49,22 +50,70 @@ def _pick_image_paths(pool: list[dict], n: int, rng: random.Random) -> list[str]
     return rng.choices(paths, k=n) if paths else []
 
 
+def _load_checkpoint(checkpoint_path: Path) -> dict[str, dict]:
+    """image_path -> {'text','prompt'} eşlemesi döner. Dosya yoksa boş sözlük döner."""
+    if not checkpoint_path.exists():
+        return {}
+    entries: dict[str, dict] = {}
+    with open(checkpoint_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            entries[rec["image_path"]] = rec
+    return entries
+
+
 def _generate_pool(
     model, processor, image_paths: list[str], prompt_sampler, rng: random.Random, source_tag: str
 ) -> list[dict]:
-    records = []
-    for path in tqdm(image_paths, desc=f"[replay_generation] {source_tag}"):
-        image = io_utils.open_image(path)
-        prompt = prompt_sampler(rng)
-        generated_text = generate_batch(model, processor, [image], [prompt])[0]
-        if not generated_text:
-            continue  # boş üretimler (nadiren) atlanır
-        # `prompt` burada AÇIKÇA kaydedilir: build_chat_dataset.py bu hedef metni
-        # kurarken YENİ bir prompt seçmek yerine tam olarak bunu yeniden kullanmalıdır
-        # (bkz. io_utils.save_ocr_records docstring'i).
-        records.append(
-            {"image": image, "text": generated_text, "source": source_tag, "prompt": prompt}
+    """Bu adım (T4 + 4-bit + tam-sayfa döküman görselleri) tek başına ~1-2 saat
+    sürebiliyor; Colab oturumu bu sürede kesilirse (bağlantı kopması, süre sınırı,
+    bilgisayarın kapatılması) ARA KAYIT olmadan TÜM ilerleme kaybolur. Bunu önlemek
+    için her üretilen örnek, üretilir üretilmez Drive'daki (KALICI, /tmp gibi geçici
+    diskte DEĞİL) bir .jsonl checkpoint dosyasına satır satır yazılıp flush edilir.
+    Script yeniden başlatıldığında, `image_paths` listesi AYNI seed ile AYNI sırada
+    üretildiğinden (bkz. main() içindeki _pick_image_paths çağrıları), checkpoint'te
+    zaten bulunan görseller ATLANIR ve yalnızca eksik kalanlar üretilir."""
+    checkpoint_path = config.RAW_DATA_DIR / "replay_checkpoints" / f"{source_tag}.jsonl"
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    done = _load_checkpoint(checkpoint_path)
+    if done:
+        print(
+            f"      Önceki bir çalıştırmadan {len(done)} doğrulanmış {source_tag} "
+            "kaydı bulundu (checkpoint); bunlar yeniden üretilmeyecek."
         )
+
+    records = []
+    with open(checkpoint_path, "a", encoding="utf-8") as checkpoint_file:
+        for path in tqdm(image_paths, desc=f"[replay_generation] {source_tag}"):
+            if path in done:
+                cached = done[path]
+                records.append(
+                    {
+                        "image": io_utils.open_image(path),
+                        "text": cached["text"],
+                        "source": source_tag,
+                        "prompt": cached["prompt"],
+                    }
+                )
+                continue
+            image = io_utils.open_image(path)
+            prompt = prompt_sampler(rng)
+            generated_text = generate_batch(model, processor, [image], [prompt])[0]
+            if not generated_text:
+                continue  # boş üretimler (nadiren) atlanır, checkpoint'e de yazılmaz
+            # `prompt` burada AÇIKÇA kaydedilir: build_chat_dataset.py bu hedef metni
+            # kurarken YENİ bir prompt seçmek yerine tam olarak bunu yeniden kullanmalıdır
+            # (bkz. io_utils.save_ocr_records docstring'i).
+            records.append(
+                {"image": image, "text": generated_text, "source": source_tag, "prompt": prompt}
+            )
+            checkpoint_file.write(
+                json.dumps({"image_path": path, "text": generated_text, "prompt": prompt}) + "\n"
+            )
+            checkpoint_file.flush()
     return records
 
 
