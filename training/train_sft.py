@@ -111,6 +111,13 @@ def main() -> None:
         report_to=["tensorboard"],
         remove_unused_columns=False,  # ÖNEMLİ: özel collator ham 'image/instruction/answer' sütunlarını bekler
         dataset_kwargs={"skip_prepare_dataset": True},  # TRL'nin otomatik VLM hazırlama/tokenizasyon adımını atla
+        # ENABLE_EMBED_LORA=True + ensure_weight_tying (bkz. lora_setup.py) `lm_head`'i
+        # de LoRA adaptörüne dahil ediyor (embed_tokens ile PAYLAŞILAN ağırlık tutarlı
+        # kalsın diye -- bkz. Risk 6 tartışması). TRL'nin varsayılan "chunked_nll" kayıp
+        # modu, LoRA'lı bir lm_head ile ÇALIŞMIYOR (ValueError fırlatıyor); standart
+        # "nll" moduna geçiyoruz -- doğruluk aynı, yalnızca bellek-verimli chunked
+        # implementasyonu kullanılmıyor (küçük veri/model ölçeğimizde önemsiz bir fark).
+        loss_type="nll",
         # NOT: max_length/max_seq_length BİLEREK burada YOK. skip_prepare_dataset=True
         # olduğu için TRL kendi tokenizasyon/packing adımını hiç çalıştırmıyor; kesme
         # (truncation) zaten training/collate.py içindeki Qwen25VLDataCollator tarafından
