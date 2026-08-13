@@ -161,10 +161,14 @@ REPLAY_SOURCE_HF_ID = "opendatalab/OmniDocBench"
 # ---------------------------------------------------------------------------
 # 4) KARIŞIM ORANLARI (Katastrofik unutmayı önlemek için veri karışımı)
 # ---------------------------------------------------------------------------
-# Üst seviye oranlar (toplamı 1.0 olmalı): %40 basılı, %35 el yazısı, %25 replay.
-MIXTURE_PRINTED = 0.40
-MIXTURE_HANDWRITING = 0.35
-MIXTURE_REPLAY = 0.25
+# Üst seviye oranlar (toplamı 1.0 olmalı).
+# NOT: Pilot epoch_1 sonucunda Test A composite_score baseline'a göre %38.86 DÜŞTÜ
+# (eşik: %15) -- katastrofik unutma. regression_report.json'ın önerisiyle replay
+# (unutmayı önleyici) payı %25 -> %40'a çıkarıldı; basılı/el yazısı oranı ARALARINDAKİ
+# oran korunarak (40:35 ≈ 8:7) toplamda %75 -> %60'a düşürüldü.
+MIXTURE_PRINTED = 0.32
+MIXTURE_HANDWRITING = 0.28
+MIXTURE_REPLAY = 0.40
 
 # "%40 basılı" kovası kullanıcının orijinal isteğinde tek bir kaynak (esengul3) olarak
 # tanımlanmıştı; TS-TR (gerçek sahne metni) ayrı bir yüzdeye sahip değildi. En mantıklı
@@ -285,7 +289,12 @@ VISION_LORA_LAST_N_FULLATT_BLOCKS = 1
 # Pilot modda her kaynaktan kaç örnek kullanılacağı (hızlı çalışsın diye).
 PILOT_SAMPLES_PER_SOURCE = 300
 
-LEARNING_RATE = 1e-4
+# NOT: Pilot epoch_1 sonucunda Test A composite_score baseline'a göre %38.86 DÜŞTÜ
+# (eşik: %15). Eğitim loglarında entropy'nin çok hızlı düşmesi (0.77 -> 0.19) ve
+# mean_token_accuracy'nin 78 adımda %85'ten %96'ya çıkması, modelin tek epoch'ta
+# aşırı agresif adapte olduğunu gösteriyor -- regression_report.json'ın önerisiyle
+# LEARNING_RATE 5 kat düşürüldü (1e-4 -> 2e-5).
+LEARNING_RATE = 2e-5
 NUM_TRAIN_EPOCHS = 1 if PILOT_MODE else 3
 LR_SCHEDULER_TYPE = "cosine"
 WARMUP_RATIO = 0.03
