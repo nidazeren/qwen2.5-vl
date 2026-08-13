@@ -41,17 +41,17 @@ def _checkpoint_path(tag: str, split_name: str) -> Path:
     return path
 
 
-def _load_checkpoint(path: Path) -> dict[int, str]:
+def _load_checkpoint(path: Path) -> dict[int, dict]:
     if not path.exists():
         return {}
-    entries: dict[int, str] = {}
+    entries: dict[int, dict] = {}
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
             rec = json.loads(line)
-            entries[rec["index"]] = rec["hypothesis"]
+            entries[rec["index"]] = rec
     return entries
 
 
@@ -60,24 +60,40 @@ def _generate_for_dataset(model, processor, ds, desc: str, checkpoint_path: Path
     bağlantı kopması gibi bir kesinti TÜM ilerlemeyi kaybettirmesin diye her üretilen
     hipotez, üretilir üretilmez Drive'daki (KALICI) bir .jsonl checkpoint dosyasına
     satır satır yazılıp flush edilir. Script yeniden başlatıldığında, checkpoint'te
-    zaten bulunan indeksler ATLANIR (bkz. replay_generation.py'deki aynı desen)."""
+    zaten bulunan indeksler ATLANIR (bkz. replay_generation.py'deki aynı desen).
+
+    ÖNEMLİ: Checkpoint yalnızca İNDEKSE değil, o indeksteki REFERANS metne de bakarak
+    doğrulanır. Neden: `evaluate.py` farklı oturumlarda çalıştırıldığında, altta yatan
+    test_a/test_b veri seti (data/build_chat_dataset.py yeniden çalıştırılırsa) DEĞİŞEBİLİR
+    -- bu durumda eski çalıştırmadaki "indeks 42" ile yeni çalıştırmadaki "indeks 42" ARTIK
+    FARKLI bir örneğe karşılık gelir. Yalnızca indekse güvenmek, referansla eşleşmeyen eski
+    bir hipotezi sessizce yeniden kullanıp skorları anlamsızlaştırırdı (gerçekten yaşanan bir
+    hata). Referans metin uyuşmuyorsa, o örnek veri seti değişmiş sayılıp yeniden üretilir."""
     done = _load_checkpoint(checkpoint_path)
     if done:
         print(
             f"      Önceki bir çalıştırmadan {len(done)} doğrulanmış '{desc}' "
-            "kaydı bulundu (checkpoint); bunlar yeniden üretilmeyecek."
+            "kaydı bulundu (checkpoint); referansı eşleşenler yeniden üretilmeyecek."
         )
 
+    stale = 0
     hypotheses: list[str] = [""] * len(ds)
     with open(checkpoint_path, "a", encoding="utf-8") as checkpoint_file:
         for i, row in enumerate(tqdm(ds, desc=desc)):
-            if i in done:
-                hypotheses[i] = done[i]
+            cached = done.get(i)
+            if cached is not None and cached.get("reference") == row["answer"]:
+                hypotheses[i] = cached["hypothesis"]
                 continue
+            if cached is not None:
+                stale += 1  # indeks vardı ama referans farklı -> veri seti değişmiş
             hyp = generate_batch(model, processor, [row["image"]], [row["instruction"]])[0]
             hypotheses[i] = hyp
-            checkpoint_file.write(json.dumps({"index": i, "hypothesis": hyp}) + "\n")
+            checkpoint_file.write(
+                json.dumps({"index": i, "reference": row["answer"], "hypothesis": hyp}) + "\n"
+            )
             checkpoint_file.flush()
+    if stale:
+        print(f"      !! {stale} checkpoint kaydı referansı eşleşmediği için yeniden üretildi (veri seti değişmiş olabilir).")
     return hypotheses
 
 
