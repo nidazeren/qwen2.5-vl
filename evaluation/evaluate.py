@@ -32,11 +32,11 @@ from training.inference_utils import generate_batch  # noqa: E402
 from tqdm import tqdm  # type: ignore
 
 
-def _checkpoint_path(tag: str, split_name: str) -> Path:
+def _checkpoint_path(tag: str, split_name: str, output_dir: Path) -> Path:
     """Her (tag, split) çifti için AYRI bir checkpoint dosyası: farklı bir etiketle
     (ör. 'epoch_1') yapılan bir değerlendirme, farklı bir model durumuna ait olduğu
     için 'baseline' checkpoint'iyle asla karışmamalı."""
-    path = config.EVAL_OUTPUT_DIR / "checkpoints" / f"{tag}_{split_name}.jsonl"
+    path = output_dir / "checkpoints" / f"{tag}_{split_name}.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -97,9 +97,9 @@ def _generate_for_dataset(model, processor, ds, desc: str, checkpoint_path: Path
     return hypotheses
 
 
-def evaluate_test_a(model, processor, tag: str) -> dict:
+def evaluate_test_a(model, processor, tag: str, output_dir: Path) -> dict:
     ds = build_test_sets.load_test_a()
-    checkpoint_path = _checkpoint_path(tag, "test_a")
+    checkpoint_path = _checkpoint_path(tag, "test_a", output_dir)
     hypotheses = _generate_for_dataset(model, processor, ds, "Test Seti A", checkpoint_path)
     references = ds["answer"]
     sources = ds["source"]
@@ -125,9 +125,9 @@ def evaluate_test_a(model, processor, tag: str) -> dict:
     }
 
 
-def evaluate_test_b(model, processor, tag: str) -> dict:
+def evaluate_test_b(model, processor, tag: str, output_dir: Path) -> dict:
     ds = build_test_sets.load_test_b()
-    checkpoint_path = _checkpoint_path(tag, "test_b")
+    checkpoint_path = _checkpoint_path(tag, "test_b", output_dir)
     hypotheses = _generate_for_dataset(model, processor, ds, "Test Seti B", checkpoint_path)
     # list(...) ZORUNLU: `datasets` kütüphanesi ds["answer"] için düz bir Python list
     # DEĞİL, bir `Column` nesnesi döndürüyor; `jiwer` yalnızca str/list[str] kabul eder.
@@ -136,16 +136,24 @@ def evaluate_test_b(model, processor, tag: str) -> dict:
     return {"n_examples": len(ds), **ocr_metrics}
 
 
-def evaluate_all(model, processor, tag: str) -> dict:
-    """Test A + Test B'yi çalıştırır, sonucu EVAL_OUTPUT_DIR/{tag}.json olarak kaydeder."""
+def evaluate_all(model, processor, tag: str, output_dir: Path | None = None) -> dict:
+    """Test A + Test B'yi çalıştırır, sonucu {output_dir}/{tag}.json olarak kaydeder.
+
+    `output_dir` verilmezse config.EVAL_OUTPUT_DIR (paylaşılan/kök klasör) kullanılır --
+    CLI kullanımı (`python evaluation/evaluate.py --tag ...`) ve baseline üretimi
+    (train_sft.py:_ensure_baseline) için budur. training/callbacks.py, koşuma özgü
+    (RUN_NAME'e göre ayrılmış) epoch değerlendirmeleri için config.EVAL_RUN_OUTPUT_DIR'ı
+    AÇIKÇA geçer (bkz. configs/config.py: EVAL_OUTPUT_DIR vs EVAL_RUN_OUTPUT_DIR notu)."""
+    output_dir = output_dir if output_dir is not None else config.EVAL_OUTPUT_DIR
     config.ensure_directories()
-    print(f"[evaluate] '{tag}' etiketiyle değerlendirme başlıyor...")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[evaluate] '{tag}' etiketiyle değerlendirme başlıyor -> {output_dir}")
     result = {
         "tag": tag,
-        "test_a": evaluate_test_a(model, processor, tag),
-        "test_b": evaluate_test_b(model, processor, tag),
+        "test_a": evaluate_test_a(model, processor, tag, output_dir),
+        "test_b": evaluate_test_b(model, processor, tag, output_dir),
     }
-    out_path = config.EVAL_OUTPUT_DIR / f"{tag}.json"
+    out_path = output_dir / f"{tag}.json"
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[evaluate] Sonuç kaydedildi: {out_path}")
     print(f"           Test A composite_score = {result['test_a']['composite_score']:.4f}")

@@ -123,7 +123,48 @@ def load_base_model_and_processor(load_in_4bit: bool = False):
 # ---------------------------------------------------------------------------
 # 2) Hedef modüllerin dinamik keşfi
 # ---------------------------------------------------------------------------
-_TARGET_LEAF_SUFFIXES = ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj")
+_ATTN_LEAF_SUFFIXES = ("q_proj", "k_proj", "v_proj", "o_proj")
+_MLP_LEAF_SUFFIXES = ("gate_proj", "up_proj", "down_proj")
+_TARGET_LEAF_SUFFIXES = _ATTN_LEAF_SUFFIXES + _MLP_LEAF_SUFFIXES
+
+_LAYER_INDEX_PATTERN = re.compile(r"\.layers\.(\d+)\.")
+
+
+def _active_target_suffixes() -> tuple[str, ...]:
+    """config.LORA_TARGET_SCOPE'a göre hangi projeksiyon türlerinin LoRA hedefi
+    olacağını belirler ("attn_only" -> yalnızca q,k,v,o; aksi halde attn+mlp)."""
+    if config.LORA_TARGET_SCOPE == "attn_only":
+        return _ATTN_LEAF_SUFFIXES
+    if config.LORA_TARGET_SCOPE != "attn_mlp":
+        print(
+            f"[lora_setup] !! Bilinmeyen LORA_TARGET_SCOPE={config.LORA_TARGET_SCOPE!r}; "
+            "'attn_mlp' (varsayılan) kullanılıyor."
+        )
+    return _TARGET_LEAF_SUFFIXES
+
+
+def _parse_layer_index(name: str) -> int | None:
+    """Modül yolundan LLM decoder katman indeksini çıkarır (ör.
+    'model.language_model.layers.23.self_attn.q_proj' -> 23). Decoder katmanı
+    içermeyen (merger/embed gibi) yollarda None döner."""
+    match = _LAYER_INDEX_PATTERN.search(name)
+    return int(match.group(1)) if match else None
+
+
+def _resolve_layer_scope(scope: str, num_layers: int) -> set[int]:
+    """config.LORA_LAYER_SCOPE ("all" veya "lastN") ile keşfedilen toplam katman
+    sayısından, LoRA'nın uygulanacağı katman İNDEKSLERİ kümesini üretir."""
+    if num_layers <= 0:
+        return set()
+    if scope == "all":
+        return set(range(num_layers))
+    match = re.fullmatch(r"last(\d+)", scope)
+    if not match:
+        raise ValueError(
+            f"Geçersiz LORA_LAYER_SCOPE: {scope!r} (beklenen: 'all' veya 'lastN', ör. 'last12')."
+        )
+    n = min(int(match.group(1)), num_layers)
+    return set(range(num_layers - n, num_layers))
 
 
 def discover_target_modules(model) -> dict[str, list[str]]:
@@ -134,10 +175,36 @@ def discover_target_modules(model) -> dict[str, list[str]]:
       - "vision": (yalnızca ENABLE_VISION_LORA=True iken doldurulur) son N tam-attention
         vision bloğundaki Linear katmanlar
 
+    "llm" kategorisi İKİ ablation bayrağına göre ayrıca daraltılır:
+      - config.LORA_TARGET_SCOPE: "attn_only" iken yalnızca q/k/v/o projeksiyonları
+        (MLP'ye LoRA UYGULANMAZ); "attn_mlp" (varsayılan) iken hepsi.
+      - config.LORA_LAYER_SCOPE: "lastN" iken yalnızca decoder'ın SON N katmanı
+        hedeflenir (alt katmanlar tamamen dondurulmuş kalır, LoRA adaptörü ALMAZLAR);
+        "all" (varsayılan) iken tüm katmanlar. Toplam katman sayısı HARDCODE EDİLMEZ,
+        keşfedilen modül isimlerindeki en yüksek katman indeksinden (+1) TÜRETİLİR --
+        böylece bu dosyanın geri kalanındaki "sabit yol yok" ilkesiyle tutarlı kalır.
+
     Sonuç, tam nitelikli (dotted) modül isimlerinden oluşan listelerdir; bu isimler
     doğrudan LoraConfig(target_modules=...) içinde TAM EŞLEŞME olarak kullanılacağı için
     kısa isim çakışması (ör. görsel encoder'daki "mlp.gate_proj") riski oluşmaz.
     """
+    active_suffixes = _active_target_suffixes()
+
+    # Katman sayısını TÜM projeksiyon türlerine (suffix daraltmasından ÖNCE) bakarak
+    # belirliyoruz; aksi halde "attn_only" iken MLP-only bir modelde (varsayımsal) katman
+    # sayısı yanlış hesaplanabilirdi. Qwen2.5-VL'de her katman hem attn hem mlp içerdiği
+    # için pratikte fark etmez, ama bu daha sağlam bir varsayım.
+    all_layer_indices = [
+        idx
+        for name, module in model.named_modules()
+        if isinstance(module, torch.nn.Linear)
+        and name.endswith(_TARGET_LEAF_SUFFIXES)
+        and "visual" not in name
+        and (idx := _parse_layer_index(name)) is not None
+    ]
+    num_layers = (max(all_layer_indices) + 1) if all_layer_indices else 0
+    allowed_layer_indices = _resolve_layer_scope(config.LORA_LAYER_SCOPE, num_layers)
+
     llm_targets: list[str] = []
     merger_targets: list[str] = []
     embed_targets: list[str] = []
@@ -146,8 +213,10 @@ def discover_target_modules(model) -> dict[str, list[str]]:
         is_linear_like = isinstance(module, (torch.nn.Linear,))
         is_embedding = isinstance(module, torch.nn.Embedding)
 
-        if is_linear_like and name.endswith(_TARGET_LEAF_SUFFIXES) and "visual" not in name:
-            llm_targets.append(name)
+        if is_linear_like and name.endswith(active_suffixes) and "visual" not in name:
+            layer_idx = _parse_layer_index(name)
+            if layer_idx is None or layer_idx in allowed_layer_indices:
+                llm_targets.append(name)
         elif is_linear_like and "merger" in name:
             merger_targets.append(name)
         elif is_embedding and name.endswith("embed_tokens") and "visual" not in name:
@@ -157,6 +226,11 @@ def discover_target_modules(model) -> dict[str, list[str]]:
     if config.ENABLE_VISION_LORA:
         vision_targets = _discover_vision_lora_targets(model)
 
+    print(
+        f"[lora_setup] LoRA layer scope='{config.LORA_LAYER_SCOPE}' -> {num_layers} katmandan "
+        f"{len(allowed_layer_indices)} tanesi hedefleniyor: {sorted(allowed_layer_indices)}"
+    )
+    print(f"[lora_setup] LoRA target scope='{config.LORA_TARGET_SCOPE}' -> aktif suffix'ler: {active_suffixes}")
     print(f"[lora_setup] Keşfedilen LLM hedef modül sayısı: {len(llm_targets)}")
     if llm_targets:
         print(f"             örnekler: {llm_targets[:3]} ...")

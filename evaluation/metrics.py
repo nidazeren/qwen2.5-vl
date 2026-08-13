@@ -14,6 +14,7 @@ Değerlendirme metrikleri:
 """
 
 import sys
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -22,6 +23,8 @@ import jiwer  # type: ignore
 from rouge_score import rouge_scorer  # type: ignore
 
 _rouge_scorer = rouge_scorer.RougeScorer(["rougeL"], use_stemmer=False)
+
+TURKISH_SPECIAL_CHARS = set("çğıöşüÇĞİÖŞÜ")
 
 
 def _normalize(text: str) -> str:
@@ -62,12 +65,35 @@ def compute_rouge_l(references: list[str], hypotheses: list[str]) -> float:
     return sum(scores) / len(scores)
 
 
+def compute_turkish_char_accuracy(references: list[str], hypotheses: list[str]) -> float:
+    """Türkçe özel karakterlerin (ç,ğ,ı,ö,ş,ü + büyük harfleri) hipotezde ne ölçüde
+    KORUNDUĞUNU ölçer (0.0-1.0, yüksek = iyi). CER/WER tüm karakterleri eşit ağırlıklandırır
+    ve İngilizce/ASCII karakterlerin çoğunlukta olduğu bir metinde birkaç yanlış "ş"/"ğ"
+    toplam skoru neredeyse etkilemez -- bu proje özelinde tam olarak izlenmek istenen
+    hata türü budur (bkz. proje notları: "Türkçe karakter doğruluğu"). Bu yüzden her
+    referans için Türkçe özel karakterlerin multiset'i (Counter) çıkarılır ve hipotezdeki
+    aynı karakter multiset'iyle KESİŞİM oranı (referanstaki her karakterin hipotezde de
+    bulunma oranı) hesaplanır -- konumdan bağımsız, kaba ama yorumlanması kolay bir ölçüt.
+    Referanslarda hiç Türkçe özel karakter yoksa (ör. saf İngilizce el yazısı örnekleri)
+    1.0 (nötr/mükemmel) döner -- bu kaynaklarda metrik tanımsızdır, ceza uygulanmaz."""
+    total = 0
+    correct = 0
+    for ref, hyp in zip(references, hypotheses):
+        ref_chars = Counter(ch for ch in ref if ch in TURKISH_SPECIAL_CHARS)
+        hyp_chars = Counter(ch for ch in hyp if ch in TURKISH_SPECIAL_CHARS)
+        for ch, ref_count in ref_chars.items():
+            total += ref_count
+            correct += min(ref_count, hyp_chars.get(ch, 0))
+    return correct / total if total else 1.0
+
+
 def compute_ocr_metrics(references: list[str], hypotheses: list[str]) -> dict:
     """OCR odaklı kaynaklar (basılı/sahne/el yazısı) için standart metrik seti."""
     return {
         "cer": compute_cer(references, hypotheses),
         "wer": compute_wer(references, hypotheses),
         "exact_match": compute_exact_match(references, hypotheses),
+        "turkish_char_accuracy": compute_turkish_char_accuracy(references, hypotheses),
     }
 
 

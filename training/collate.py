@@ -116,4 +116,14 @@ class Qwen25VLDataCollator:
             labels[i, :cutoff] = IGNORE_INDEX
 
         batch["labels"] = labels
+
+        # `source` (ör. "printed_synthetic", "replay_ocr") burada AÇIKÇA taşınır: model
+        # forward'ına GİRMEZ (bir tensör değil, düz bir liste), yalnızca
+        # training/distillation_trainer.py:WeightedDistillationTrainer'ın (yalnızca
+        # config.ENABLE_WEIGHTED_LOSS=True iken devrede) her örneğin kaybını kaynak
+        # kovasına göre ağırlıklandırabilmesi için taşınır. transformers Trainer'ın
+        # `_prepare_inputs` adımı yalnızca TENSÖR değerleri cihaza taşır; düz listeler
+        # olduğu gibi geçer, bu yüzden burada eklenmesi standart SFTTrainer akışını
+        # (ENABLE_WEIGHTED_LOSS=False iken) BOZMAZ.
+        batch["source"] = [ex["source"] for ex in examples]
         return batch

@@ -24,3 +24,4 @@ bitsandbytes>=0.43.0
 tqdm>=4.66.0
 sentencepiece>=0.2.0
 tensorboard>=2.16.0
+matplotlib>=3.7.0
