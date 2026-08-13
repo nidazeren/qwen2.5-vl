@@ -23,6 +23,7 @@ Bu dosya iki şeyi yapar:
      "visual" GEÇMEYEN katmanlar seçilir; görsel encoder'a dokunulmaz (varsayılan).
 """
 
+import inspect
 import re
 import sys
 from pathlib import Path
@@ -233,7 +234,7 @@ def build_lora_config(model) -> LoraConfig:
             rank_pattern[re.escape(name)] = config.VISION_LORA_R
             alpha_pattern[re.escape(name)] = config.VISION_LORA_ALPHA
 
-    return LoraConfig(
+    lora_config_kwargs = dict(
         r=config.LORA_R,
         lora_alpha=config.LORA_ALPHA,
         lora_dropout=config.LORA_DROPOUT,
@@ -243,6 +244,25 @@ def build_lora_config(model) -> LoraConfig:
         bias="none",
         task_type="CAUSAL_LM",
     )
+
+    # Qwen2.5-VL, `embed_tokens` (girdi gömme matrisi) ile `lm_head` (çıktı projeksiyonu)
+    # AYNI ağırlık tensörünü PAYLAŞIR (tie_word_embeddings=True). ENABLE_EMBED_LORA=True
+    # iken embed_tokens'a LoRA uygularsak, bu LoRA farkının (delta) çıktı tahminlerine de
+    # (lm_head üzerinden) doğru şekilde yansıması için peft'in `ensure_weight_tying`
+    # ayarının açık olması gerekir -- aksi halde LoRA yalnızca GİRDİ tarafında etkili
+    # olup ÇIKTI (üretim) olasılıklarını tutarsız şekilde etkileyebilir (bkz. peft
+    # #2777). Yalnızca embed_tokens hedeflendiğinde VE kurulu peft sürümü bu parametreyi
+    # destekliyorsa eklenir (eski peft sürümleriyle geriye dönük uyumluluk için).
+    if config.ENABLE_EMBED_LORA and targets["embed"]:
+        if "ensure_weight_tying" in inspect.signature(LoraConfig).parameters:
+            lora_config_kwargs["ensure_weight_tying"] = True
+        else:
+            print(
+                "[lora_setup] !! Kurulu peft sürümü 'ensure_weight_tying' desteklemiyor; "
+                "embed_tokens LoRA'sı ile lm_head arasındaki bağ tutarlılığı garanti edilemez."
+            )
+
+    return LoraConfig(**lora_config_kwargs)
 
 
 def apply_lora(model) -> PeftModel:
