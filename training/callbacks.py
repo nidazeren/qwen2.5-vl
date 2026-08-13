@@ -53,6 +53,22 @@ class TestABRegressionCallback(TrainerCallback):
         epoch_int = int(round(state.epoch)) if state.epoch is not None else len(self.history) + 1
         tag = f"epoch_{epoch_int}"
 
+        # `evaluate.py`'nin checkpoint mekanizması, AYNI etiket (ör. "epoch_1") + AYNI
+        # referans metinlerle karşılaşırsa eski hipotezleri yeniden kullanır -- bu,
+        # evaluate.py'nin TEK BİR çalıştırmasının kesintiye uğrayıp devam etmesi için
+        # doğrudur. AMA `train_sft.py` sıfırdan yeniden çalıştırılırsa (ör. önceki
+        # deneme regresyon nedeniyle durdu, yeniden eğitiliyor), YENİ eğitilen model
+        # ile ESKİ denemenin modeli TAMAMEN FARKLIDIR -- ikisi de "epoch_1" etiketini
+        # üretir. Checkpoint'i temizlemezsek, bu yeni (gerçekte farklı) modelin
+        # performansı yerine ESKİ modelin (yanlışlıkla) hâlâ geçerli sayılan
+        # hipotezleri kullanılıp yanıltıcı bir sonuç üretilebilir. Bu yüzden her
+        # epoch değerlendirmesi başlamadan önce, bu etikete ait checkpoint dosyaları
+        # SİLİNİR -- her çağrı, altındaki model gerçekten farklı olabileceğinden,
+        # her zaman TAZE üretim yapmalıdır.
+        for split_name in ("test_a", "test_b"):
+            checkpoint_path = config.EVAL_OUTPUT_DIR / "checkpoints" / f"{tag}_{split_name}.jsonl"
+            checkpoint_path.unlink(missing_ok=True)
+
         was_training = model.training
         model.eval()
         result = evaluate_all(model, self.processor, tag=tag)
